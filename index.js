@@ -3,11 +3,20 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
+const cookieParser = require('cookie-parser'); // Added
 require('dotenv').config();
 
 const app = express();
-app.use(cors());
+const allowedOrigins = [
+  'https://your-frontend.vercel.app',
+  'http://localhost:5173'
+];
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true
+}));
 app.use(express.json());
+app.use(cookieParser()); // Added
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/login_cookies';
@@ -46,13 +55,31 @@ app.post('/api/login', async (req, res) => {
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) return res.status(401).json({ message: 'Invalid credentials' });
   const token = jwt.sign({ id: user._id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ token });
+  // Set token as HTTP-only cookie
+  res.cookie('token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+  });
+  res.json({ message: 'Login successful' });
+});
+
+// Logout endpoint
+app.post('/api/logout', (req, res) => {
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/', // Ensure path matches
+  });
+  console.log('User logged out, cookie cleared');
+  res.json({ message: 'Logged out' });
 });
 
 // Middleware to verify JWT
 function auth(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const token = req.cookies.token; // Changed to read from cookie
   if (!token) return res.sendStatus(401);
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) return res.sendStatus(403);
